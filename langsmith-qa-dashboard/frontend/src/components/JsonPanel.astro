@@ -1,0 +1,53 @@
+---
+export interface Props {
+  items: Array<{ question: string; context: string; professor_response: string }>;
+}
+const { items } = Astro.props;
+const jsonString = JSON.stringify(items, null, 2);
+---
+
+<div class="json-panel" data-testid="json-view" style="display:none">
+  <div class="json-panel__header">
+    <span class="json-panel__title">JSON Dataset</span>
+    <span class="json-panel__count">{items.length} items</span>
+  </div>
+  <pre class="json-panel__code"><code>{jsonString}</code></pre>
+</div>
+
+<style>
+  .json-panel {
+    background: #0f172a;
+    border-radius: 12px;
+    overflow: hidden;
+    margin-top: 1rem;
+  }
+  .json-panel__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 1.25rem;
+    background: #1e293b;
+    border-bottom: 1px solid #334155;
+  }
+  .json-panel__title {
+    color: #94a3b8;
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .json-panel__count {
+    color: #64748b;
+    font-size: 0.8rem;
+  }
+  .json-panel__code {
+    margin: 0;
+    padding: 1.25rem;
+    overflow-x: auto;
+    font-size: 0.82rem;
+    line-height: 1.6;
+    color: #e2e8f0;
+    font-family: "Fira Code", "Cascadia Code", "Consolas", monospace;
+    white-space: pre;
+  }
+</style>

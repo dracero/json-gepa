@@ -1,0 +1,29 @@
+# Environment
+.env
+.env.local
+.env.*.local
+*.env
+backend/.env
+
+# Python / Backend
+backend/.venv/
+backend/venv/
+backend/env/
+backend/__pycache__/
+backend/.pytest_cache/
+backend/*.py[cod]
+backend/*$py.class
+backend/.uv/
+
+# Node / Frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.astro/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# System
+.DS_Store
+Thumbs.db

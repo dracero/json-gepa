@@ -1,0 +1,9 @@
+{
+  "name": "json-gepa",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "npm run dev --prefix langsmith-qa-dashboard",
+    "install:all": "npm install --prefix langsmith-qa-dashboard"
+  }
+}

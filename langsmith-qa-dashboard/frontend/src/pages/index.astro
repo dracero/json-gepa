@@ -1,0 +1,161 @@
+---
+import QACard from "../components/QACard.astro";
+import JsonPanel from "../components/JsonPanel.astro";
+import ViewToggle from "../components/ViewToggle.astro";
+import ExportButton from "../components/ExportButton.astro";
+import type { QAItem } from "../lib/api";
+
+const API_URL = import.meta.env.PUBLIC_API_URL ?? "http://localhost:8000";
+
+let items: QAItem[] = [];
+let errorMessage: string | null = null;
+
+try {
+  const res = await fetch(`${API_URL}/qa-dataset`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    errorMessage = body?.error ?? body?.detail ?? `HTTP ${res.status}`;
+  } else {
+    items = await res.json();
+  }
+} catch (err: any) {
+  errorMessage = "No se pudo conectar con el servidor. Asegúrate de que el backend está corriendo en " + API_URL;
+}
+---
+
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LangSmith QA Dashboard</title>
+    <meta name="description" content="Dashboard para visualizar y exportar datasets de preguntas y respuestas generados desde LangSmith" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  </head>
+  <body>
+    <header class="header">
+      <div class="header__inner">
+        <div class="header__brand">
+          <span class="header__logo">⚗️</span>
+          <h1 class="header__title">LangSmith QA Dashboard</h1>
+        </div>
+        <div class="header__actions">
+          <ExportButton />
+        </div>
+      </div>
+    </header>
+
+    <main class="main">
+      {errorMessage ? (
+        <div class="error-banner" role="alert">
+          <span class="error-banner__icon">⚠️</span>
+          <span>{errorMessage}</span>
+        </div>
+      ) : items.length === 0 ? (
+        <div class="empty-state">
+          <span class="empty-state__icon">📭</span>
+          <p>No se encontraron interacciones en las últimas 48 horas.</p>
+          <p class="empty-state__hint">Verifica que el proyecto LangSmith tiene trazas recientes.</p>
+        </div>
+      ) : (
+        <div class="content">
+          <div class="toolbar">
+            <p class="toolbar__count">{items.length} pregunta{items.length !== 1 ? "s" : ""} encontrada{items.length !== 1 ? "s" : ""}</p>
+            <ViewToggle />
+          </div>
+
+          <div data-testid="card-view">
+            {items.map((item, i) => (
+              <QACard item={item} index={i} />
+            ))}
+          </div>
+
+          <JsonPanel items={items} />
+        </div>
+      )}
+    </main>
+
+    <!-- Expose dataset and API URL to client-side scripts -->
+    <script define:vars={{ qaDataset: items, apiUrl: API_URL }}>
+      window.__QA_DATASET__ = qaDataset;
+      window.__API_URL__ = apiUrl;
+    </script>
+  </body>
+</html>
+
+<style is:global>
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #f8fafc;
+    color: #1e293b;
+    min-height: 100vh;
+  }
+</style>
+
+<style>
+  .header {
+    background: #ffffff;
+    border-bottom: 1px solid #e2e8f0;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  .header__inner {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 1rem 1.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .header__brand {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .header__logo { font-size: 1.5rem; }
+  .header__title {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #1e293b;
+  }
+  .main {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 2rem 1.5rem;
+  }
+  .error-banner {
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    color: #dc2626;
+    font-size: 0.95rem;
+  }
+  .error-banner__icon { font-size: 1.2rem; flex-shrink: 0; }
+  .empty-state {
+    text-align: center;
+    padding: 4rem 2rem;
+    color: #64748b;
+  }
+  .empty-state__icon { font-size: 3rem; display: block; margin-bottom: 1rem; }
+  .empty-state__hint { font-size: 0.85rem; color: #94a3b8; }
+  .toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+  }
+  .toolbar__count {
+    margin: 0;
+    font-size: 0.9rem;
+    color: #64748b;
+    font-weight: 500;
+  }
+</style>

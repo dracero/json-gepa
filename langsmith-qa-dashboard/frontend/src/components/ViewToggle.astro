@@ -1,0 +1,63 @@
+---
+// No props needed — uses DOM data attributes to toggle views
+---
+
+<div class="view-toggle">
+  <button
+    id="view-toggle-btn"
+    class="view-toggle__btn view-toggle__btn--active"
+    data-current-view="cards"
+    role="button"
+    aria-label="Alternar vista"
+  >
+    <span data-label-cards>🃏 Vista Tarjetas</span>
+    <span data-label-json style="display:none">{ } Vista JSON</span>
+  </button>
+</div>
+
+<script>
+  const btn = document.getElementById("view-toggle-btn") as HTMLButtonElement;
+  const cardView = document.querySelector('[data-testid="card-view"]') as HTMLElement | null;
+  const jsonView = document.querySelector('[data-testid="json-view"]') as HTMLElement | null;
+  const labelCards = btn?.querySelector("[data-label-cards]") as HTMLElement | null;
+  const labelJson = btn?.querySelector("[data-label-json]") as HTMLElement | null;
+
+  btn?.addEventListener("click", () => {
+    const current = btn.dataset.currentView;
+    if (current === "cards") {
+      if (cardView) cardView.style.display = "none";
+      if (jsonView) jsonView.style.display = "block";
+      if (labelCards) labelCards.style.display = "none";
+      if (labelJson) labelJson.style.display = "inline";
+      btn.dataset.currentView = "json";
+    } else {
+      if (cardView) cardView.style.display = "block";
+      if (jsonView) jsonView.style.display = "none";
+      if (labelCards) labelCards.style.display = "inline";
+      if (labelJson) labelJson.style.display = "none";
+      btn.dataset.currentView = "cards";
+    }
+  });
+</script>
+
+<style>
+  .view-toggle {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 1rem;
+  }
+  .view-toggle__btn {
+    background: #6366f1;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 0.5rem 1.25rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s ease;
+  }
+  .view-toggle__btn:hover {
+    background: #4f46e5;
+  }
+</style>

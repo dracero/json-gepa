@@ -1,0 +1,81 @@
+---
+// ExportButton reads the dataset from a global window variable set by index.astro
+---
+
+<div class="export-wrapper">
+  <button id="export-btn" class="export-btn" role="button">
+    ⬇ Exportar JSON
+  </button>
+  <span id="export-msg" class="export-msg" style="display:none"></span>
+</div>
+
+<script>
+  import { exportDataset } from "../lib/api";
+
+  const btn = document.getElementById("export-btn") as HTMLButtonElement;
+  const msg = document.getElementById("export-msg") as HTMLElement;
+
+  function showMsg(text: string, isError = false) {
+    msg.textContent = text;
+    msg.style.color = isError ? "#ef4444" : "#22c55e";
+    msg.style.display = "inline";
+    setTimeout(() => { msg.style.display = "none"; }, 4000);
+  }
+
+  btn?.addEventListener("click", async () => {
+    const items = (window as any).__QA_DATASET__;
+    if (!items || items.length === 0) {
+      showMsg("No hay datos para exportar.", true);
+      return;
+    }
+    try {
+      btn.disabled = true;
+      btn.textContent = "Exportando...";
+      const blob = await exportDataset(items);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "qa_dataset.json";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showMsg("✓ Descarga iniciada");
+    } catch (err: any) {
+      showMsg(`Error: ${err.message}`, true);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "⬇ Exportar JSON";
+    }
+  });
+</script>
+
+<style>
+  .export-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+  .export-btn {
+    background: #10b981;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 0.5rem 1.25rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s ease;
+  }
+  .export-btn:hover:not(:disabled) {
+    background: #059669;
+  }
+  .export-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  .export-msg {
+    font-size: 0.85rem;
+    font-weight: 500;
+  }
+</style>

@@ -1,0 +1,17 @@
+{
+  "name": "langsmith-qa-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Full stack LangSmith QA Dashboard — FastAPI backend + Astro.js frontend",
+  "scripts": {
+    "dev": "concurrently --names \"backend,frontend\" --prefix-colors \"cyan,magenta\" \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "cd backend && WATCHFILES_FORCE_POLLING=true uv run uvicorn main:app --reload --reload-dir models --reload-dir routers --reload-dir services --port 8000",
+    "dev:frontend": "cd frontend && CHOKIDAR_USEPOLLING=true npm run dev",
+    "install:frontend": "cd frontend && npm install",
+    "install:backend": "cd backend && uv sync --extra dev",
+    "install": "npm run install:backend && npm run install:frontend"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
