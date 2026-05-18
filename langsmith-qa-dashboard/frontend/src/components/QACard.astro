@@ -43,12 +43,12 @@ const renderedResponse = renderLatex(item.professor_response);
 
   <div class="qa-card__question">
     <h3>Pregunta</h3>
-    <p set:html={renderedQuestion} />
+    <div contenteditable="true" class="editable-content" id={`question-text-${index}`} set:html={renderedQuestion} />
   </div>
 
   <div class="qa-card__response">
     <h3>Respuesta del Profesor</h3>
-    <div set:html={renderedResponse} />
+    <div contenteditable="true" class="editable-content" id={`response-text-${index}`} set:html={renderedResponse} />
   </div>
 
   <!-- ── AI Analysis Panel ─────────────────────────────────────── -->
@@ -57,8 +57,6 @@ const renderedResponse = renderLatex(item.professor_response);
       class="analysis-trigger"
       id={`analysis-btn-${index}`}
       data-index={index}
-      data-question={item.question}
-      data-response={item.professor_response}
       data-context={item.context}
       aria-expanded="false"
       aria-controls={`analysis-content-${index}`}
@@ -85,7 +83,7 @@ const renderedResponse = renderLatex(item.professor_response);
             <span class="agent-card__icon">🔍</span>
             <span>Agente 1 · Pregunta</span>
           </div>
-          <div class="agent-card__body" id={`qa-${index}`}></div>
+          <div contenteditable="true" class="agent-card__body editable-content" id={`qa-${index}`}></div>
         </div>
 
         <div class="agent-card agent-card--response">
@@ -93,7 +91,7 @@ const renderedResponse = renderLatex(item.professor_response);
             <span class="agent-card__icon">📝</span>
             <span>Agente 2 · Respuesta</span>
           </div>
-          <div class="agent-card__body" id={`ra-${index}`}></div>
+          <div contenteditable="true" class="agent-card__body editable-content" id={`ra-${index}`}></div>
         </div>
 
         <div class="agent-card agent-card--retrieval">
@@ -101,7 +99,7 @@ const renderedResponse = renderLatex(item.professor_response);
             <span class="agent-card__icon">🗄️</span>
             <span>Agente 3 · Qdrant</span>
           </div>
-          <div class="agent-card__body" id={`ret-${index}`}></div>
+          <div contenteditable="true" class="agent-card__body editable-content" id={`ret-${index}`}></div>
         </div>
 
         <div class="agent-card agent-card--suggestions">
@@ -109,7 +107,7 @@ const renderedResponse = renderLatex(item.professor_response);
             <span class="agent-card__icon">💡</span>
             <span>Agente 4 · Sugerencias</span>
           </div>
-          <div class="agent-card__body" id={`sug-${index}`}></div>
+          <div contenteditable="true" class="agent-card__body editable-content" id={`sug-${index}`}></div>
         </div>
       </div>
     </div>
@@ -207,12 +205,15 @@ const renderedResponse = renderLatex(item.professor_response);
       errorEl.hidden = true;
 
       try {
+        const currentQuestion = document.getElementById(`question-text-${idx}`)?.innerText || "";
+        const currentResponse = document.getElementById(`response-text-${idx}`)?.innerText || "";
+
         const res = await fetch(`${API_URL}/analyze`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            question: btn.dataset.question,
-            agent_response: btn.dataset.response,
+            question: currentQuestion,
+            agent_response: currentResponse,
             retrieval_context: btn.dataset.context ?? "",
           }),
         });
@@ -312,6 +313,19 @@ const renderedResponse = renderLatex(item.professor_response);
   .qa-card__response div :global(.katex-display) {
     margin: 1rem 0;
     overflow-x: auto;
+  }
+  
+  .editable-content[contenteditable="true"] {
+    outline: none;
+    border-radius: 4px;
+    transition: background-color 0.2s, box-shadow 0.2s;
+  }
+  .editable-content[contenteditable="true"]:hover {
+    background-color: rgba(0, 0, 0, 0.02);
+  }
+  .editable-content[contenteditable="true"]:focus {
+    background-color: #fff;
+    box-shadow: 0 0 0 2px #c7d2fe;
   }
 
   /* ── Analysis panel ──────────────────────────────────────────── */
