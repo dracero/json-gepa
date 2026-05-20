@@ -6,21 +6,6 @@ import ExportButton from "../components/ExportButton.astro";
 import type { QAItem } from "../lib/api";
 
 const API_URL = import.meta.env.PUBLIC_API_URL ?? "http://localhost:8000";
-
-let items: QAItem[] = [];
-let errorMessage: string | null = null;
-
-try {
-  const res = await fetch(`${API_URL}/qa-dataset`);
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    errorMessage = body?.error ?? body?.detail ?? `HTTP ${res.status}`;
-  } else {
-    items = await res.json();
-  }
-} catch (err: any) {
-  errorMessage = "No se pudo conectar con el servidor. Asegúrate de que el backend está corriendo en " + API_URL;
-}
 ---
 
 <!doctype html>
@@ -46,39 +31,512 @@ try {
     </header>
 
     <main class="main">
-      {errorMessage ? (
-        <div class="error-banner" role="alert">
-          <span class="error-banner__icon">⚠️</span>
-          <span>{errorMessage}</span>
+      <!-- Formulario de búsqueda -->
+      <div class="search-form">
+        <div class="form-group">
+          <label for="project-input" class="form-label">
+            Proyecto de LangSmith
+          </label>
+          <div class="input-wrapper">
+            <input 
+              type="text" 
+              id="project-input" 
+              class="form-input"
+              placeholder="Ej: socratico_test, rag-histologia-v4"
+              autocomplete="off"
+            />
+            <button id="clear-btn" class="clear-btn" title="Limpiar campo" style="display: none;">
+              ✕
+            </button>
+          </div>
+          <p class="form-hint">Deja vacío para usar el proyecto por defecto</p>
         </div>
-      ) : items.length === 0 ? (
+        <button id="load-btn" class="btn-primary">
+          Cargar Datos
+        </button>
+      </div>
+
+      <!-- Área de contenido dinámico -->
+      <div id="content-area">
         <div class="empty-state">
-          <span class="empty-state__icon">📭</span>
-          <p>No se encontraron interacciones en las últimas 48 horas.</p>
-          <p class="empty-state__hint">Verifica que el proyecto LangSmith tiene trazas recientes.</p>
+          <span class="empty-state__icon">🔍</span>
+          <p>Ingresa el nombre del proyecto y haz clic en "Cargar Datos"</p>
+          <p class="empty-state__hint">Se cargarán las interacciones de los últimos 7 días</p>
         </div>
-      ) : (
-        <div class="content">
-          <div class="toolbar">
-            <p class="toolbar__count">{items.length} pregunta{items.length !== 1 ? "s" : ""} encontrada{items.length !== 1 ? "s" : ""}</p>
-            <ViewToggle />
-          </div>
-
-          <div data-testid="card-view">
-            {items.map((item, i) => (
-              <QACard item={item} index={i} />
-            ))}
-          </div>
-
-          <JsonPanel items={items} />
-        </div>
-      )}
+      </div>
     </main>
 
-    <!-- Expose dataset and API URL to client-side scripts -->
-    <script define:vars={{ qaDataset: items, apiUrl: API_URL }}>
-      window.__QA_DATASET__ = qaDataset;
+    <!-- Expose API URL to client-side scripts -->
+    <script define:vars={{ apiUrl: API_URL }}>
       window.__API_URL__ = apiUrl;
+    </script>
+
+    <script>
+      const loadBtn = document.getElementById('load-btn');
+      const projectInput = document.getElementById('project-input');
+      const clearBtn = document.getElementById('clear-btn');
+      const contentArea = document.getElementById('content-area');
+
+      // Restaurar último proyecto usado
+      const lastProject = localStorage.getItem('lastProject');
+      if (lastProject) {
+        projectInput.value = lastProject;
+        clearBtn.style.display = 'block';
+      }
+
+      // Mostrar/ocultar botón de limpiar
+      projectInput?.addEventListener('input', () => {
+        clearBtn.style.display = projectInput.value ? 'block' : 'none';
+      });
+
+      // Limpiar campo
+      clearBtn?.addEventListener('click', () => {
+        projectInput.value = '';
+        clearBtn.style.display = 'none';
+        projectInput.focus();
+        localStorage.removeItem('lastProject');
+      });
+
+      // Permitir Enter para cargar
+      projectInput?.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+          loadBtn?.click();
+        }
+      });
+
+      loadBtn?.addEventListener('click', async () => {
+        const project = projectInput?.value?.trim();
+        
+        // Guardar último proyecto usado
+        if (project) {
+          localStorage.setItem('lastProject', project);
+        }
+
+        // Mostrar loading
+        contentArea.innerHTML = `
+          <div class="loading-state">
+            <span class="loading-spinner">⏳</span>
+            <p>Cargando datos${project ? ` del proyecto "${project}"` : ' del proyecto por defecto'}...</p>
+          </div>
+        `;
+
+        try {
+          const url = new URL(`${window.__API_URL__}/qa-dataset`);
+          if (project) {
+            url.searchParams.set('project', project);
+          }
+
+          const res = await fetch(url.toString());
+          
+          if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            const errorMessage = body?.error ?? body?.detail?.error ?? body?.detail ?? `HTTP ${res.status}`;
+            throw new Error(errorMessage);
+          }
+
+          const items = await res.json();
+
+          if (items.length === 0) {
+            contentArea.innerHTML = `
+              <div class="empty-state">
+                <span class="empty-state__icon">📭</span>
+                <p>No se encontraron interacciones en los últimos 7 días.</p>
+                <p class="empty-state__hint">Verifica que el proyecto tiene trazas recientes.</p>
+              </div>
+            `;
+            return;
+          }
+
+          // Guardar dataset globalmente para export
+          window.__QA_DATASET__ = items;
+
+          // Renderizar contenido
+          contentArea.innerHTML = `
+            <div class="content">
+              <div class="toolbar">
+                <p class="toolbar__count">${items.length} pregunta${items.length !== 1 ? 's' : ''} encontrada${items.length !== 1 ? 's' : ''}</p>
+                <div class="view-toggle">
+                  <button class="view-toggle__btn view-toggle__btn--active" data-view="cards">
+                    📋 Tarjetas
+                  </button>
+                  <button class="view-toggle__btn" data-view="json">
+                    {} JSON
+                  </button>
+                </div>
+              </div>
+
+              <div class="card-view" data-view-content="cards">
+                ${items.map((item, i) => `
+                  <article class="qa-card" data-index="${i}">
+                    <div class="qa-card__header">
+                      <span class="qa-card__number">#${i + 1}</span>
+                      <span class="qa-card__status" id="status-${i}"></span>
+                    </div>
+                    <div class="qa-card__section">
+                      <h3 class="qa-card__label">Pregunta</h3>
+                      <p class="qa-card__text" id="question-text-${i}">${escapeHtml(item.question)}</p>
+                    </div>
+                    <div class="qa-card__section">
+                      <h3 class="qa-card__label">Contexto</h3>
+                      <p class="qa-card__text qa-card__text--muted">${escapeHtml(item.context || 'Sin contexto')}</p>
+                    </div>
+                    <div class="qa-card__section">
+                      <div class="qa-card__label-row">
+                        <h3 class="qa-card__label">Respuesta del Profesor</h3>
+                        <button class="edit-btn" data-index="${i}" title="Editar respuesta">
+                          ✏️ Editar
+                        </button>
+                      </div>
+                      <div class="response-container">
+                        <p class="qa-card__text response-text" id="response-text-${i}">${escapeHtml(item.professor_response)}</p>
+                        <textarea 
+                          class="response-editor" 
+                          id="response-editor-${i}"
+                          style="display: none;"
+                        >${escapeHtml(item.professor_response)}</textarea>
+                      </div>
+                      <div class="edit-actions" id="edit-actions-${i}" style="display: none;">
+                        <button class="btn-save" data-index="${i}">💾 Guardar</button>
+                        <button class="btn-cancel" data-index="${i}">✕ Cancelar</button>
+                      </div>
+                    </div>
+
+                    <!-- ── AI Analysis Panel ─────────────────────────────────────── -->
+                    <div class="analysis-panel" id="analysis-panel-${i}">
+                      <button
+                        class="analysis-trigger"
+                        id="analysis-btn-${i}"
+                        data-index="${i}"
+                        data-context="${escapeHtml(item.context || '')}"
+                        aria-expanded="false"
+                        aria-controls="analysis-content-${i}"
+                      >
+                        <span class="analysis-trigger__icon">✨</span>
+                        <span class="analysis-trigger__label">Analizar con IA</span>
+                        <span class="analysis-trigger__chevron">›</span>
+                      </button>
+
+                      <div class="analysis-content" id="analysis-content-${i}" hidden>
+                        <!-- Loading state -->
+                        <div class="analysis-loading" id="analysis-loading-${i}" hidden>
+                          <div class="analysis-spinner"></div>
+                          <span>Analizando con Gemini...</span>
+                        </div>
+
+                        <!-- Error state -->
+                        <div class="analysis-error" id="analysis-error-${i}" hidden></div>
+
+                        <!-- Results grid (4 agents) -->
+                        <div class="analysis-grid" id="analysis-grid-${i}" hidden>
+                          <div class="agent-card agent-card--question">
+                            <div class="agent-card__badge">
+                              <span class="agent-card__icon">🔍</span>
+                              <span>Agente 1 · Pregunta</span>
+                            </div>
+                            <div contenteditable="true" class="agent-card__body editable-content" id="qa-${i}"></div>
+                          </div>
+
+                          <div class="agent-card agent-card--response">
+                            <div class="agent-card__badge">
+                              <span class="agent-card__icon">📝</span>
+                              <span>Agente 2 · Respuesta</span>
+                            </div>
+                            <div contenteditable="true" class="agent-card__body editable-content" id="ra-${i}"></div>
+                          </div>
+
+                          <div class="agent-card agent-card--retrieval">
+                            <div class="agent-card__badge">
+                              <span class="agent-card__icon">🗄️</span>
+                              <span>Agente 3 · Qdrant</span>
+                            </div>
+                            <div contenteditable="true" class="agent-card__body editable-content" id="ret-${i}"></div>
+                          </div>
+
+                          <div class="agent-card agent-card--suggestions">
+                            <div class="agent-card__badge">
+                              <span class="agent-card__icon">💡</span>
+                              <span>Agente 4 · Sugerencias</span>
+                            </div>
+                            <div contenteditable="true" class="agent-card__body editable-content" id="sug-${i}"></div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+                `).join('')}
+              </div>
+
+              <div class="json-panel" data-view-content="json" style="display: none;">
+                <pre class="json-panel__code">${JSON.stringify(items, null, 2)}</pre>
+              </div>
+            </div>
+          `;
+
+          // Agregar event listeners para toggle y edición
+          setupViewToggle();
+          setupEditButtons();
+          setupAnalysisButtons();
+
+        } catch (err) {
+          contentArea.innerHTML = `
+            <div class="error-banner" role="alert">
+              <span class="error-banner__icon">⚠️</span>
+              <span>${err.message || 'Error al cargar los datos'}</span>
+            </div>
+          `;
+        }
+      });
+
+      function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+      }
+
+      function formatText(raw) {
+        if (!raw) return "";
+        // Convert Gemini markdown output to safe HTML
+        const lines = raw.split("\n");
+        const out = [];
+        let inList = false;
+
+        for (const line of lines) {
+          const t = line.trim();
+          if (!t) {
+            if (inList) { out.push("</ul>"); inList = false; }
+            continue;
+          }
+
+          // ## heading
+          if (t.startsWith("## ")) {
+            if (inList) { out.push("</ul>"); inList = false; }
+            out.push(`<h4>${md(t.slice(3))}</h4>`);
+            continue;
+          }
+          // # heading
+          if (t.startsWith("# ")) {
+            if (inList) { out.push("</ul>"); inList = false; }
+            out.push(`<h4>${md(t.slice(2))}</h4>`);
+            continue;
+          }
+
+          // Bullet: lines starting with exactly one * (not **), -, or •
+          // Must check before bold to avoid matching **bold text** as a bullet.
+          const bulletMatch = t.match(/^([\-•]|\*(?!\*))\s+(.+)/);
+          if (bulletMatch) {
+            if (!inList) { out.push("<ul>"); inList = true; }
+            out.push(`<li>${md(bulletMatch[2])}</li>`);
+            continue;
+          }
+
+          // Numbered list: 1. text
+          const numMatch = t.match(/^\d+\.\s+(.+)/);
+          if (numMatch) {
+            if (!inList) { out.push("<ul>"); inList = true; }
+            out.push(`<li>${md(numMatch[1])}</li>`);
+            continue;
+          }
+
+          if (inList) { out.push("</ul>"); inList = false; }
+          out.push(`<p>${md(t)}</p>`);
+        }
+
+        if (inList) out.push("</ul>");
+        return out.join("");
+      }
+
+      // Inline markdown: **bold**, *italic*, `code`
+      function md(s) {
+        return s
+          .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+          .replace(/\*(.+?)\*/g, "<em>$1</em>")
+          .replace(/`(.+?)`/g, "<code>$1</code>");
+      }
+
+      function setupAnalysisButtons() {
+        document.querySelectorAll('.analysis-trigger').forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            const idx = btn.getAttribute("data-index");
+            const content = document.getElementById(`analysis-content-${idx}`);
+            const loading = document.getElementById(`analysis-loading-${idx}`);
+            const errorEl = document.getElementById(`analysis-error-${idx}`);
+            const grid = document.getElementById(`analysis-grid-${idx}`);
+            const chevron = btn.querySelector(".analysis-trigger__chevron");
+
+            const isOpen = btn.getAttribute("aria-expanded") === "true";
+
+            // Toggle open/close
+            if (isOpen) {
+              content.hidden = true;
+              btn.setAttribute("aria-expanded", "false");
+              if (chevron) chevron.style.transform = "";
+              return;
+            }
+
+            btn.setAttribute("aria-expanded", "true");
+            if (chevron) chevron.style.transform = "rotate(90deg)";
+            content.hidden = false;
+
+            // Don't re-fetch if already loaded
+            if (!grid.hidden) return;
+
+            loading.hidden = false;
+            errorEl.hidden = true;
+
+            try {
+              const currentQuestion = document.getElementById(`question-text-${idx}`)?.innerText || "";
+              const currentResponse = document.getElementById(`response-text-${idx}`)?.innerText || "";
+
+              const res = await fetch(`${window.__API_URL__}/analyze`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  question: currentQuestion,
+                  agent_response: currentResponse,
+                  retrieval_context: btn.getAttribute("data-context") ?? "",
+                }),
+              });
+
+              if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                const errMsg = err?.detail?.error ?? err?.error ?? (typeof err?.detail === 'string' ? err?.detail : null) ?? `HTTP ${res.status}`;
+                throw new Error(errMsg);
+              }
+
+              const data = await res.json();
+
+              document.getElementById(`qa-${idx}`).innerHTML = formatText(data.question_analysis);
+              document.getElementById(`ra-${idx}`).innerHTML = formatText(data.response_analysis);
+              document.getElementById(`ret-${idx}`).innerHTML = formatText(data.retrieval_analysis);
+              document.getElementById(`sug-${idx}`).innerHTML = formatText(data.improvement_suggestions);
+
+              loading.hidden = true;
+              grid.hidden = false;
+            } catch (err) {
+              loading.hidden = true;
+              errorEl.hidden = false;
+              errorEl.textContent = `Error: ${err.message}`;
+            }
+          });
+        });
+      }
+
+
+
+      function setupViewToggle() {
+        const buttons = document.querySelectorAll('.view-toggle__btn');
+        buttons.forEach(btn => {
+          btn.addEventListener('click', () => {
+            const view = btn.getAttribute('data-view');
+            
+            // Update active button
+            buttons.forEach(b => b.classList.remove('view-toggle__btn--active'));
+            btn.classList.add('view-toggle__btn--active');
+            
+            // Show/hide content
+            document.querySelectorAll('[data-view-content]').forEach(el => {
+              el.style.display = el.getAttribute('data-view-content') === view ? 'block' : 'none';
+            });
+
+            // Update JSON panel with current data
+            if (view === 'json') {
+              const jsonPanel = document.querySelector('.json-panel__code');
+              if (jsonPanel) {
+                jsonPanel.textContent = JSON.stringify(window.__QA_DATASET__, null, 2);
+              }
+            }
+          });
+        });
+      }
+
+      function setupEditButtons() {
+        // Botones de editar
+        document.querySelectorAll('.edit-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const index = parseInt(btn.getAttribute('data-index'));
+            enterEditMode(index);
+          });
+        });
+
+        // Botones de guardar
+        document.querySelectorAll('.btn-save').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const index = parseInt(btn.getAttribute('data-index'));
+            saveEdit(index);
+          });
+        });
+
+        // Botones de cancelar
+        document.querySelectorAll('.btn-cancel').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const index = parseInt(btn.getAttribute('data-index'));
+            cancelEdit(index);
+          });
+        });
+      }
+
+      function enterEditMode(index) {
+        const textEl = document.getElementById(`response-text-${index}`);
+        const editorEl = document.getElementById(`response-editor-${index}`);
+        const actionsEl = document.getElementById(`edit-actions-${index}`);
+        const editBtn = document.querySelector(`.edit-btn[data-index="${index}"]`);
+
+        textEl.style.display = 'none';
+        editorEl.style.display = 'block';
+        actionsEl.style.display = 'flex';
+        editBtn.style.display = 'none';
+
+        // Auto-resize textarea
+        editorEl.style.height = 'auto';
+        editorEl.style.height = editorEl.scrollHeight + 'px';
+        editorEl.focus();
+      }
+
+      function saveEdit(index) {
+        const editorEl = document.getElementById(`response-editor-${index}`);
+        const textEl = document.getElementById(`response-text-${index}`);
+        const actionsEl = document.getElementById(`edit-actions-${index}`);
+        const editBtn = document.querySelector(`.edit-btn[data-index="${index}"]`);
+        const statusEl = document.getElementById(`status-${index}`);
+
+        const newValue = editorEl.value;
+
+        // Actualizar el dataset global
+        if (window.__QA_DATASET__ && window.__QA_DATASET__[index]) {
+          window.__QA_DATASET__[index].professor_response = newValue;
+        }
+
+        // Actualizar la vista
+        textEl.textContent = newValue;
+        textEl.style.display = 'block';
+        editorEl.style.display = 'none';
+        actionsEl.style.display = 'none';
+        editBtn.style.display = 'inline-flex';
+
+        // Mostrar indicador de guardado
+        statusEl.textContent = '✓ Editado';
+        statusEl.className = 'qa-card__status qa-card__status--edited';
+        setTimeout(() => {
+          statusEl.textContent = '';
+          statusEl.className = 'qa-card__status';
+        }, 2000);
+      }
+
+      function cancelEdit(index) {
+        const textEl = document.getElementById(`response-text-${index}`);
+        const editorEl = document.getElementById(`response-editor-${index}`);
+        const actionsEl = document.getElementById(`edit-actions-${index}`);
+        const editBtn = document.querySelector(`.edit-btn[data-index="${index}"]`);
+
+        // Restaurar valor original
+        const originalValue = window.__QA_DATASET__[index].professor_response;
+        editorEl.value = originalValue;
+
+        textEl.style.display = 'block';
+        editorEl.style.display = 'none';
+        actionsEl.style.display = 'none';
+        editBtn.style.display = 'inline-flex';
+      }
     </script>
   </body>
 </html>
@@ -91,6 +549,142 @@ try {
     background: #f8fafc;
     color: #1e293b;
     min-height: 100vh;
+  }
+
+  /* ── Analysis panel ──────────────────────────────────────────── */
+  .analysis-panel {
+    margin-top: 1.25rem;
+    border-top: 1px dashed #e2e8f0;
+    padding-top: 1rem;
+  }
+
+  .analysis-trigger {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 0.5rem 1rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s, transform 0.15s;
+    width: 100%;
+    justify-content: center;
+  }
+  .analysis-trigger:hover { opacity: 0.9; transform: translateY(-1px); }
+  .analysis-trigger:active { transform: translateY(0); }
+
+  .analysis-trigger__icon { font-size: 1rem; }
+  .analysis-trigger__chevron {
+    margin-left: auto;
+    font-size: 1.1rem;
+    transition: transform 0.2s ease;
+    line-height: 1;
+  }
+
+  /* Loading */
+  .analysis-loading {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1rem;
+    color: #6366f1;
+    font-size: 0.9rem;
+    font-weight: 500;
+  }
+  .analysis-spinner {
+    width: 18px;
+    height: 18px;
+    border: 2px solid #e0e7ff;
+    border-top-color: #6366f1;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    flex-shrink: 0;
+  }
+
+  /* Error */
+  .analysis-error {
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    color: #dc2626;
+    font-size: 0.85rem;
+    margin-top: 0.75rem;
+  }
+
+  /* Results grid */
+  .analysis-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+    margin-top: 1rem;
+  }
+  @media (max-width: 640px) {
+    .analysis-grid { grid-template-columns: 1fr; }
+  }
+
+  /* Agent cards */
+  .agent-card {
+    border-radius: 10px;
+    padding: 0.875rem 1rem;
+    border: 1px solid transparent;
+  }
+  .agent-card--question  { background: #eff6ff; border-color: #bfdbfe; }
+  .agent-card--response  { background: #f0fdf4; border-color: #bbf7d0; }
+  .agent-card--retrieval { background: #fdf4ff; border-color: #e9d5ff; }
+  .agent-card--suggestions {
+    background: linear-gradient(135deg, #fffbeb 0%, #fef9c3 100%);
+    border-color: #fde68a;
+    grid-column: 1 / -1;   /* full width — suggestions are the key output */
+  }
+
+  .agent-card__badge {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #475569;
+    margin-bottom: 0.5rem;
+  }
+  .agent-card__icon { font-size: 0.95rem; }
+
+  .agent-card__body {
+    font-size: 0.85rem;
+    color: #334155;
+    line-height: 1.6;
+  }
+  .agent-card__body p  { margin: 0.25rem 0; }
+  .agent-card__body h4 {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #1e293b;
+    margin: 0.6rem 0 0.2rem;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .agent-card__body ul {
+    margin: 0.25rem 0;
+    padding-left: 1.25rem;
+  }
+  .agent-card__body li {
+    margin: 0.25rem 0;
+    list-style: disc;
+  }
+  .agent-card__body strong { font-weight: 700; color: #1e293b; }
+  .agent-card__body em     { font-style: italic; }
+  .agent-card__body code {
+    font-family: ui-monospace, monospace;
+    font-size: 0.8em;
+    background: rgba(0,0,0,0.07);
+    border-radius: 3px;
+    padding: 0.1em 0.35em;
   }
 </style>
 
@@ -157,5 +751,305 @@ try {
     font-size: 0.9rem;
     color: #64748b;
     font-weight: 500;
+  }
+
+  /* Formulario de búsqueda */
+  .search-form {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+    display: flex;
+    gap: 1rem;
+    align-items: flex-end;
+  }
+  .form-group {
+    flex: 1;
+  }
+  .form-label {
+    display: block;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #475569;
+    margin-bottom: 0.5rem;
+  }
+  .input-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+  .form-input {
+    width: 100%;
+    padding: 0.625rem 2.5rem 0.625rem 0.875rem;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    transition: all 0.2s;
+  }
+  .form-input:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  }
+  .clear-btn {
+    position: absolute;
+    right: 0.5rem;
+    background: #e2e8f0;
+    border: none;
+    border-radius: 6px;
+    width: 1.75rem;
+    height: 1.75rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: #64748b;
+    font-size: 0.875rem;
+    transition: all 0.2s;
+  }
+  .clear-btn:hover {
+    background: #cbd5e1;
+    color: #1e293b;
+  }
+  .form-hint {
+    margin: 0.375rem 0 0 0;
+    font-size: 0.75rem;
+    color: #94a3b8;
+    font-style: italic;
+  }
+  .btn-primary {
+    padding: 0.625rem 1.5rem;
+    background: #3b82f6;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+  .btn-primary:hover {
+    background: #2563eb;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+  }
+  .btn-primary:active {
+    transform: translateY(0);
+  }
+
+  /* Loading state */
+  .loading-state {
+    text-align: center;
+    padding: 4rem 2rem;
+    color: #64748b;
+  }
+  .loading-spinner {
+    font-size: 3rem;
+    display: block;
+    margin-bottom: 1rem;
+    animation: spin 2s linear infinite;
+  }
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
+  /* View toggle */
+  .view-toggle {
+    display: flex;
+    gap: 0.5rem;
+    background: #f1f5f9;
+    padding: 0.25rem;
+    border-radius: 8px;
+  }
+  .view-toggle__btn {
+    padding: 0.5rem 1rem;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #64748b;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .view-toggle__btn:hover {
+    color: #1e293b;
+  }
+  .view-toggle__btn--active {
+    background: white;
+    color: #1e293b;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+
+  /* QA Card styles */
+  .qa-card {
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 1rem;
+    transition: all 0.2s;
+  }
+  .qa-card:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    transform: translateY(-2px);
+  }
+  .qa-card__header {
+    margin-bottom: 1rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .qa-card__number {
+    display: inline-block;
+    background: #f1f5f9;
+    color: #64748b;
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 0.25rem 0.625rem;
+    border-radius: 6px;
+  }
+  .qa-card__status {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.25rem 0.625rem;
+    border-radius: 6px;
+  }
+  .qa-card__status--edited {
+    background: #dcfce7;
+    color: #16a34a;
+  }
+  .qa-card__section {
+    margin-bottom: 1.25rem;
+  }
+  .qa-card__section:last-child {
+    margin-bottom: 0;
+  }
+  .qa-card__label {
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #64748b;
+    margin: 0 0 0.5rem 0;
+  }
+  .qa-card__label-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+  }
+  .qa-card__label-row .qa-card__label {
+    margin: 0;
+  }
+  .qa-card__text {
+    margin: 0;
+    line-height: 1.6;
+    color: #1e293b;
+    white-space: pre-wrap;
+  }
+  .qa-card__text--muted {
+    color: #64748b;
+    font-style: italic;
+  }
+
+  /* Edit button */
+  .edit-btn {
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 0.375rem 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #475569;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+  .edit-btn:hover {
+    background: #e2e8f0;
+    color: #1e293b;
+    border-color: #cbd5e1;
+  }
+
+  /* Response editor */
+  .response-container {
+    position: relative;
+  }
+  .response-editor {
+    width: 100%;
+    min-height: 120px;
+    padding: 0.75rem;
+    border: 2px solid #3b82f6;
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 0.95rem;
+    line-height: 1.6;
+    color: #1e293b;
+    resize: vertical;
+    transition: all 0.2s;
+  }
+  .response-editor:focus {
+    outline: none;
+    border-color: #2563eb;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  }
+
+  /* Edit actions */
+  .edit-actions {
+    margin-top: 0.75rem;
+    display: flex;
+    gap: 0.5rem;
+  }
+  .btn-save, .btn-cancel {
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+  .btn-save {
+    background: #22c55e;
+    color: white;
+  }
+  .btn-save:hover {
+    background: #16a34a;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(34, 197, 94, 0.3);
+  }
+  .btn-cancel {
+    background: #f1f5f9;
+    color: #64748b;
+    border: 1px solid #e2e8f0;
+  }
+  .btn-cancel:hover {
+    background: #e2e8f0;
+    color: #475569;
+  }
+
+  /* JSON Panel */
+  .json-panel {
+    background: #1e293b;
+    border-radius: 12px;
+    padding: 1.5rem;
+    overflow: auto;
+    max-height: 600px;
+  }
+  .json-panel__code {
+    margin: 0;
+    color: #e2e8f0;
+    font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+    font-size: 0.875rem;
+    line-height: 1.6;
   }
 </style>

@@ -14,6 +14,7 @@ class Interaction(BaseModel):
     turn_index: int
     question: str
     agent_response: str
+    retrieval_context: str = ""
     history: list[HistoryTurn]
 
 

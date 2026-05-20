@@ -11,13 +11,11 @@ from pydantic import BaseModel
 from config import get_settings, Settings
 from models.schemas import AnalysisResult, Interaction, QAItem
 from services.langsmith_extractor import LangSmithExtractor
-from services.context_inferrer import ContextInferrer
 from services.qa_analyst import QAAnalyst
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-_inferrer = ContextInferrer()
 
 
 def get_extractor(settings: Annotated[Settings, Depends(get_settings)]) -> LangSmithExtractor:
@@ -42,7 +40,15 @@ async def get_interactions(
         )
     except Exception as exc:
         logger.exception("Error fetching interactions")
-        raise HTTPException(status_code=500, detail={"error": str(exc)})
+        # Mejorar mensaje de error para proyectos no encontrados
+        error_msg = str(exc)
+        if "not found" in error_msg.lower():
+            project_name = project or extractor.default_project
+            raise HTTPException(
+                status_code=404, 
+                detail={"error": f"El proyecto '{project_name}' no existe en LangSmith. Verifica el nombre del proyecto."}
+            )
+        raise HTTPException(status_code=500, detail={"error": error_msg})
 
 
 @router.get("/qa-dataset", response_model=list[QAItem])
@@ -61,14 +67,22 @@ async def get_qa_dataset(
         return [
             QAItem(
                 question=ix.question,
-                context=_inferrer.infer(ix.question, ix.agent_response),
+                context=ix.retrieval_context.strip(),
                 professor_response=ix.agent_response,
             )
             for ix in interactions
         ]
     except Exception as exc:
         logger.exception("Error generating QA dataset")
-        raise HTTPException(status_code=500, detail={"error": str(exc)})
+        # Mejorar mensaje de error para proyectos no encontrados
+        error_msg = str(exc)
+        if "not found" in error_msg.lower():
+            project_name = project or extractor.default_project
+            raise HTTPException(
+                status_code=404, 
+                detail={"error": f"El proyecto '{project_name}' no existe en LangSmith. Verifica el nombre del proyecto."}
+            )
+        raise HTTPException(status_code=500, detail={"error": error_msg})
 
 
 @router.get("/debug/runs")
@@ -130,6 +144,29 @@ async def debug_runs(
                 "outputs_preview": {k: truncate(v) for k, v in list(outputs_raw.items())[:3]},
             })
     return {"traces_inspected": len(root_runs), "runs": result}
+
+
+@router.get("/debug/projects")
+async def debug_projects(
+    extractor: LangSmithExtractor = Depends(get_extractor),
+) -> dict:
+    """Debug endpoint: lists all available projects for the configured API key."""
+    try:
+        projects = list(extractor.client.list_projects())
+        return {
+            "total_projects": len(projects),
+            "projects": [
+                {
+                    "name": p.name,
+                    "id": str(p.id),
+                    "created_at": p.created_at.isoformat() if p.created_at else None,
+                }
+                for p in projects
+            ]
+        }
+    except Exception as exc:
+        logger.exception("Error listing projects")
+        raise HTTPException(status_code=500, detail={"error": str(exc)})
 
 
 @router.post("/qa-dataset/export")

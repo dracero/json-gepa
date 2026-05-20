@@ -13,6 +13,7 @@ the final node has the full picture to produce improvement suggestions.
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 import time
@@ -85,87 +86,78 @@ def _invoke_with_retry(llm: ChatGoogleGenerativeAI, messages: list, max_retries:
 # ── Node implementations ─────────────────────────────────────────────────────
 
 def _node_question_analyst(state: AnalystState) -> dict:
-    """Agent 1 — Analyzes the clarity and didactic quality of the question."""
+    """Agent 1 — Runs the combined analysis in a single Gemini call."""
     llm = state["_llm"]
     messages = [
         SystemMessage(content=(
-            "Eres un experto en pedagogía universitaria de física. "
-            "Tu tarea es evaluar la calidad de la pregunta de un estudiante. "
-            "Responde en español en 3-5 oraciones concisas."
+            "Eres un experto en pedagogía y didáctica universitaria, y un coordinador de calidad "
+            "para sistemas de tutoría de inteligencia artificial.\n"
+            "Tu tarea es analizar una interacción entre un estudiante y un tutor de IA, evaluando "
+            "la pregunta, la respuesta del agente, y el contexto recuperado (RAG) de los manuales.\n"
+            "Identifica el dominio temático a partir del contenido (puede ser histología, física, "
+            "matemáticas, biología u otro) y proporciona análisis y sugerencias específicas y accionables.\n\n"
+            "Responde EXCLUSIVAMENTE con un objeto JSON que contenga las siguientes llaves (todos los valores deben ser cadenas de texto - strings):\n"
+            "{\n"
+            "  \"question_analysis\": \"(3-5 oraciones en español evaluando la claridad y comprensión de la pregunta)\",\n"
+            "  \"response_analysis\": \"(3-5 oraciones en español evaluando la calidad didáctica/pedagógica de la respuesta del agente IA)\",\n"
+            "  \"retrieval_analysis\": \"(3-5 oraciones en español evaluando la relevancia del contexto recuperado)\",\n"
+            "  \"improvement_suggestions\": \"(3-5 sugerencias de mejora accionables y específicas en formato de cadena de texto simple con saltos de línea, donde cada línea empiece con • y un espacio. Ejemplo: • Sugerencia 1\\n• Sugerencia 2\\n• Sugerencia 3)\"\n"
+            "}\n"
+            "No incluyas markdown (como ```json) ni texto adicional fuera del JSON."
         )),
         HumanMessage(content=(
-            f"Pregunta del estudiante:\n{state['question']}\n\n"
-            "Evalúa: ¿Es la pregunta clara? ¿Muestra comprensión del tema? "
-            "¿Qué conceptos físicos está intentando entender el estudiante?"
-        )),
+            f"### Interacción a Analizar:\n"
+            f"**Pregunta del Estudiante:**\n{state['question']}\n\n"
+            f"**Respuesta del Agente:**\n{state['agent_response']}\n\n"
+            f"**Contexto Recuperado (RAG):**\n{state.get('retrieval_context', '').strip() or 'No se encontró contexto de recuperación.'}\n\n"
+            f"Por favor, analiza la interacción anterior y responde con el objeto JSON solicitado."
+        ))
     ]
     response = _invoke_with_retry(llm, messages)
-    return {"question_analysis": response.content}
+    
+    # Parse JSON cleanly
+    try:
+        content_str = response.content.strip()
+        if content_str.startswith("```"):
+            # Strip markdown block if model generated it anyway
+            lines = content_str.split("\n")
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines[-1].startswith("```"):
+                lines = lines[:-1]
+            content_str = "\n".join(lines).strip()
+            
+        data = json.loads(content_str)
+        return {
+            "question_analysis": str(data.get("question_analysis", "")),
+            "response_analysis": str(data.get("response_analysis", "")),
+            "retrieval_analysis": str(data.get("retrieval_analysis", "")),
+            "improvement_suggestions": str(data.get("improvement_suggestions", "")),
+        }
+    except Exception as exc:
+        logger.exception("Error parsing combined JSON response: %s", response.content)
+        # Fallback in case of json parsing error
+        return {
+            "question_analysis": "Error al analizar la pregunta.",
+            "response_analysis": "Error al analizar la respuesta.",
+            "retrieval_analysis": "Error al analizar el contexto recuperado.",
+            "improvement_suggestions": f"Error: No se pudo generar la sugerencia. ({str(exc)})",
+        }
 
 
 def _node_response_analyst(state: AnalystState) -> dict:
-    """Agent 2 — Analyzes the pedagogical quality of the agent's response."""
-    llm = state["_llm"]
-    messages = [
-        SystemMessage(content=(
-            "Eres un experto en didáctica de ciencias. "
-            "Tu tarea es evaluar la calidad pedagógica de la respuesta de un agente IA. "
-            "Responde en español en 3-5 oraciones concisas."
-        )),
-        HumanMessage(content=(
-            f"Pregunta del estudiante:\n{state['question']}\n\n"
-            f"Respuesta del agente:\n{state['agent_response']}\n\n"
-            "Evalúa: ¿Es la respuesta completa? ¿Es pedagógicamente adecuada? "
-            "¿Usa correctamente el método socrático? ¿Hay imprecisiones?"
-        )),
-    ]
-    response = _invoke_with_retry(llm, messages)
-    return {"response_analysis": response.content}
+    """Agent 2 — Pass-through (runs combined in node 1)"""
+    return {}
 
 
 def _node_retrieval_analyst(state: AnalystState) -> dict:
-    """Agent 3 — Analyzes the relevance of what Qdrant retrieved."""
-    llm = state["_llm"]
-    retrieval = state.get("retrieval_context", "").strip()
-    if not retrieval:
-        return {"retrieval_analysis": "No se encontró contexto de recuperación (Qdrant) para esta interacción."}
-
-    messages = [
-        SystemMessage(content=(
-            "Eres un experto en sistemas de recuperación de información (RAG) para física. "
-            "Tu tarea es evaluar si el contexto recuperado por Qdrant fue relevante. "
-            "Responde en español en 3-5 oraciones concisas."
-        )),
-        HumanMessage(content=(
-            f"Pregunta del estudiante:\n{state['question']}\n\n"
-            f"Contexto recuperado por Qdrant:\n{retrieval}\n\n"
-            "Evalúa: ¿El contexto recuperado es relevante para la pregunta? "
-            "¿Faltó algún concepto importante? ¿Hay ruido o información irrelevante?"
-        )),
-    ]
-    response = _invoke_with_retry(llm, messages)
-    return {"retrieval_analysis": response.content}
+    """Agent 3 — Pass-through (runs combined in node 1)"""
+    return {}
 
 
 def _node_improvement_synthesizer(state: AnalystState) -> dict:
-    """Agent 4 — Synthesizes all analyses and produces actionable suggestions."""
-    llm = state["_llm"]
-    messages = [
-        SystemMessage(content=(
-            "Eres un coordinador de calidad pedagógica para un sistema de tutoría IA de física. "
-            "Recibirás tres análisis previos y debes sintetizarlos en sugerencias de mejora concretas. "
-            "Responde en español. Usa viñetas (•) para cada sugerencia."
-        )),
-        HumanMessage(content=(
-            f"## Análisis de la pregunta\n{state['question_analysis']}\n\n"
-            f"## Análisis de la respuesta\n{state['response_analysis']}\n\n"
-            f"## Análisis de la recuperación (Qdrant)\n{state['retrieval_analysis']}\n\n"
-            "Genera 3-5 sugerencias accionables para mejorar la calidad de las interacciones futuras. "
-            "Cada sugerencia debe ser específica y práctica."
-        )),
-    ]
-    response = _invoke_with_retry(llm, messages)
-    return {"improvement_suggestions": response.content}
+    """Agent 4 — Pass-through (runs combined in node 1)"""
+    return {}
 
 
 # ── Graph builder ────────────────────────────────────────────────────────────
