@@ -51,6 +51,27 @@ const API_URL = import.meta.env.PUBLIC_API_URL ?? "http://localhost:8000";
           </div>
           <p class="form-hint">Deja vacío para usar el proyecto por defecto</p>
         </div>
+        <div class="form-group form-group--days">
+          <label for="days-select" class="form-label">
+            📅 Últimos días
+          </label>
+          <select id="days-select" class="form-select">
+            <option value="1">1 día</option>
+            <option value="2">2 días</option>
+            <option value="3">3 días</option>
+            <option value="4">4 días</option>
+            <option value="5">5 días</option>
+            <option value="6">6 días</option>
+            <option value="7" selected>7 días</option>
+            <option value="8">8 días</option>
+            <option value="9">9 días</option>
+            <option value="10">10 días</option>
+            <option value="11">11 días</option>
+            <option value="12">12 días</option>
+            <option value="13">13 días</option>
+            <option value="14">14 días</option>
+          </select>
+        </div>
         <button id="load-btn" class="btn-primary">
           Cargar Datos
         </button>
@@ -61,7 +82,7 @@ const API_URL = import.meta.env.PUBLIC_API_URL ?? "http://localhost:8000";
         <div class="empty-state">
           <span class="empty-state__icon">🔍</span>
           <p>Ingresa el nombre del proyecto y haz clic en "Cargar Datos"</p>
-          <p class="empty-state__hint">Se cargarán las interacciones de los últimos 7 días</p>
+          <p class="empty-state__hint">Se cargarán las interacciones de los últimos <strong>7</strong> días</p>
         </div>
       </div>
     </main>
@@ -76,12 +97,34 @@ const API_URL = import.meta.env.PUBLIC_API_URL ?? "http://localhost:8000";
       const projectInput = document.getElementById('project-input');
       const clearBtn = document.getElementById('clear-btn');
       const contentArea = document.getElementById('content-area');
+      const daysSelect = document.getElementById('days-select');
+      const emptyHint = document.querySelector('.empty-state__hint');
 
       // Restaurar último proyecto usado
       const lastProject = localStorage.getItem('lastProject');
       if (lastProject) {
         projectInput.value = lastProject;
         clearBtn.style.display = 'block';
+      }
+
+      // Restaurar últimos días seleccionados
+      const lastDays = localStorage.getItem('lastDays');
+      if (lastDays && daysSelect) {
+        daysSelect.value = lastDays;
+      }
+
+      // Actualizar hint al cambiar días
+      daysSelect?.addEventListener('change', () => {
+        const d = daysSelect.value;
+        localStorage.setItem('lastDays', d);
+        if (emptyHint) {
+          emptyHint.innerHTML = `Se cargarán las interacciones de los últimos <strong>${d}</strong> día${d === '1' ? '' : 's'}`;
+        }
+      });
+      // Sincronizar hint con valor inicial
+      if (daysSelect && emptyHint) {
+        const d = daysSelect.value;
+        emptyHint.innerHTML = `Se cargarán las interacciones de los últimos <strong>${d}</strong> día${d === '1' ? '' : 's'}`;
       }
 
       // Mostrar/ocultar botón de limpiar
@@ -106,25 +149,30 @@ const API_URL = import.meta.env.PUBLIC_API_URL ?? "http://localhost:8000";
 
       loadBtn?.addEventListener('click', async () => {
         const project = projectInput?.value?.trim();
+        const days = parseInt(daysSelect?.value || '7', 10);
         
-        // Guardar último proyecto usado
+        // Guardar últimos valores usados
         if (project) {
           localStorage.setItem('lastProject', project);
         }
+        localStorage.setItem('lastDays', String(days));
 
         // Mostrar loading
         contentArea.innerHTML = `
           <div class="loading-state">
             <span class="loading-spinner">⏳</span>
-            <p>Cargando datos${project ? ` del proyecto "${project}"` : ' del proyecto por defecto'}...</p>
+            <p>Cargando datos${project ? ` del proyecto "${project}"` : ' del proyecto por defecto'} (últimos ${days} día${days === 1 ? '' : 's'})...</p>
           </div>
         `;
 
         try {
+          // Calcular start_time como N días atrás en UTC
+          const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
           const url = new URL(`${window.__API_URL__}/qa-dataset`);
           if (project) {
             url.searchParams.set('project', project);
           }
+          url.searchParams.set('start_time', startDate.toISOString());
 
           const res = await fetch(url.toString());
           
@@ -140,8 +188,8 @@ const API_URL = import.meta.env.PUBLIC_API_URL ?? "http://localhost:8000";
             contentArea.innerHTML = `
               <div class="empty-state">
                 <span class="empty-state__icon">📭</span>
-                <p>No se encontraron interacciones en los últimos 7 días.</p>
-                <p class="empty-state__hint">Verifica que el proyecto tiene trazas recientes.</p>
+                <p>No se encontraron interacciones en los últimos ${days} día${days === 1 ? '' : 's'}.</p>
+                <p class="empty-state__hint">Verifica que el proyecto tiene trazas recientes o amplía el rango de días.</p>
               </div>
             `;
             return;
@@ -766,6 +814,34 @@ const API_URL = import.meta.env.PUBLIC_API_URL ?? "http://localhost:8000";
   }
   .form-group {
     flex: 1;
+  }
+  .form-group--days {
+    flex: 0 0 auto;
+    min-width: 130px;
+  }
+  .form-select {
+    width: 100%;
+    padding: 0.625rem 0.875rem;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    background: #ffffff;
+    color: #1e293b;
+    cursor: pointer;
+    transition: all 0.2s;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2364748b' d='M6 8.825L.35 3.175 1.525 2 6 6.475 10.475 2l1.175 1.175z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    padding-right: 2rem;
+  }
+  .form-select:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  }
+  .form-select:hover {
+    border-color: #94a3b8;
   }
   .form-label {
     display: block;
