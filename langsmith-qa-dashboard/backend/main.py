@@ -1,12 +1,9 @@
 import logging
+import os
 import sys
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
-
 from config import get_settings
-from routers.api import router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -14,13 +11,26 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Validate settings at startup — fail fast if LANGSMITH_API_KEY is missing
+# Validate settings at startup and configure LangSmith tracing environment variables BEFORE importing router/services
 try:
     _settings = get_settings()
     logger.info("LangSmith project: %s", _settings.langsmith_project)
+    
+    if _settings.langchain_tracing_v2:
+        os.environ["LANGCHAIN_TRACING_V2"] = "true"
+        api_key = _settings.langchain_api_key or _settings.langsmith_api_key
+        if api_key:
+            os.environ["LANGCHAIN_API_KEY"] = api_key
+        if _settings.langchain_project:
+            os.environ["LANGCHAIN_PROJECT"] = _settings.langchain_project
+        logger.info("LangChain tracing enabled for project: %s", os.environ.get("LANGCHAIN_PROJECT"))
 except ValidationError as exc:
     logger.error("Configuration error: %s", exc)
     sys.exit(1)
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from routers.api import router
 
 app = FastAPI(
     title="LangSmith QA Dashboard API",

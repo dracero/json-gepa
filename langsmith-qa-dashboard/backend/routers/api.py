@@ -222,6 +222,12 @@ async def analyze_interaction(
             question=body.question,
             agent_response=body.agent_response,
             retrieval_context=body.retrieval_context,
+            langsmith_extra={
+                "metadata": {
+                    "source_project": settings.langsmith_project,
+                    "target_trace": "qa_evaluation",
+                }
+            }
         )
         return AnalysisResult(**result)
     except Exception as exc:

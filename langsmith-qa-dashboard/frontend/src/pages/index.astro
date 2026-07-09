@@ -226,7 +226,9 @@ const API_URL = import.meta.env.PUBLIC_API_URL ?? "http://localhost:8000";
                     </div>
                     <div class="qa-card__section">
                       <h3 class="qa-card__label">Contexto</h3>
-                      <p class="qa-card__text qa-card__text--muted">${escapeHtml(item.context || 'Sin contexto')}</p>
+                      <div class="qa-card__context-container ${item.context ? 'qa-card__context-container--filled' : ''}">
+                        <p class="qa-card__text ${item.context ? 'qa-card__text--context' : 'qa-card__text--muted'}">${escapeHtml(item.context || 'Sin contexto')}</p>
+                      </div>
                     </div>
                     <div class="qa-card__section">
                       <div class="qa-card__label-row">
@@ -1030,6 +1032,22 @@ const API_URL = import.meta.env.PUBLIC_API_URL ?? "http://localhost:8000";
   .qa-card__text--muted {
     color: #64748b;
     font-style: italic;
+  }
+  .qa-card__context-container {
+    border-radius: 8px;
+    transition: all 0.2s ease;
+  }
+  .qa-card__context-container--filled {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    padding: 0.75rem 1rem;
+    max-height: 15rem;
+    overflow-y: auto;
+  }
+  .qa-card__text--context {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.825rem;
+    color: #334155;
   }
 
   /* Edit button */

@@ -6,10 +6,16 @@ class Settings(BaseSettings):
     langsmith_api_key: str
     langsmith_project: str = "socratico_test"
 
+    # Tracing configs
+    langchain_tracing_v2: bool = False
+    langchain_api_key: str = ""
+    langchain_project: str = "qa-analyst-traces"
+
     # Gemini / Google AI key.  We read both common env var names so the user
     # doesn't need to duplicate their key.
     gemini_api_key: str = ""
     google_api_key: str = ""
+
 
     @property
     def effective_gemini_key(self) -> str:

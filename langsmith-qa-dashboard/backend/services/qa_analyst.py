@@ -22,8 +22,16 @@ from typing import TypedDict
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import END, StateGraph
+from langsmith import traceable
 
 logger = logging.getLogger(__name__)
+
+
+@traceable(run_type="retriever", name="qdrant_retrieval_context")
+def _trace_qdrant_context(context: str) -> dict:
+    """Log the Qdrant retrieval context inside the LangSmith trace."""
+    return {"retrieved_context": context}
+
 
 # ── Shared LLM ──────────────────────────────────────────────────────────────
 # gemini-2.5-flash — best available model on this API key.
@@ -96,11 +104,14 @@ def _node_question_analyst(state: AnalystState) -> dict:
             "la pregunta, la respuesta del agente, y el contexto recuperado (RAG) de los manuales.\n"
             "Identifica el dominio temático a partir del contenido (puede ser histología, física, "
             "matemáticas, biología u otro) y proporciona análisis y sugerencias específicas y accionables.\n\n"
+            "Al realizar la evaluación, considera especialmente:\n"
+            "1. En el análisis del contexto (retrieval_analysis): Evalúa no solo la relevancia temática, sino también la completitud del contexto recuperado. Indica explícitamente si el contexto está incompleto, truncado (por ejemplo, si termina abruptamente en medio de una frase o palabra) o si carece de detalles esenciales para responder a la pregunta. Si el contexto está incompleto, justifica que esto obliga al tutor de IA a complementar su respuesta con su base de conocimiento interna.\n"
+            "2. En el análisis de la respuesta (response_analysis): Evalúa la calidad pedagógica y la alineación con el contexto. Analiza si el tutor usó el contexto disponible y si fue necesario complementarlo con conocimiento externo preentrenado para dar una respuesta didáctica de calidad. No catalogues negativamente la respuesta como 'sin contexto' si el tutor utilizó la información disponible del RAG pero la enriqueció de forma correcta e integral para ayudar al estudiante.\n\n"
             "Responde EXCLUSIVAMENTE con un objeto JSON que contenga las siguientes llaves (todos los valores deben ser cadenas de texto - strings):\n"
             "{\n"
             "  \"question_analysis\": \"(3-5 oraciones en español evaluando la claridad y comprensión de la pregunta)\",\n"
-            "  \"response_analysis\": \"(3-5 oraciones en español evaluando la calidad didáctica/pedagógica de la respuesta del agente IA)\",\n"
-            "  \"retrieval_analysis\": \"(3-5 oraciones en español evaluando la relevancia del contexto recuperado)\",\n"
+            "  \"response_analysis\": \"(3-5 oraciones en español evaluando la calidad didáctica/pedagógica de la respuesta del agente IA, considerando cómo usó y complementó el contexto)\",\n"
+            "  \"retrieval_analysis\": \"(3-5 oraciones en español evaluando la relevancia, suficiencia e integridad/truncamiento del contexto recuperado)\",\n"
             "  \"improvement_suggestions\": \"(3-5 sugerencias de mejora accionables y específicas en formato de cadena de texto simple con saltos de línea, donde cada línea empiece con • y un espacio. Ejemplo: • Sugerencia 1\\n• Sugerencia 2\\n• Sugerencia 3)\"\n"
             "}\n"
             "No incluyas markdown (como ```json) ni texto adicional fuera del JSON."
@@ -187,11 +198,14 @@ class QAAnalyst:
         self._llm = _make_llm(gemini_api_key, model)
         self._graph = _build_graph()
 
+    @traceable(run_type="chain", name="qa_analyst_pipeline")
     def analyze(
         self,
         question: str,
         agent_response: str,
         retrieval_context: str = "",
+        *,
+        langsmith_extra: dict | None = None,
     ) -> dict:
         """
         Run the full pipeline and return a dict with keys:
@@ -200,6 +214,10 @@ class QAAnalyst:
           - retrieval_analysis
           - improvement_suggestions
         """
+        # Explicitly trace the retrieval context to make it a distinct step in LangSmith
+        if retrieval_context:
+            _trace_qdrant_context(retrieval_context)
+
         initial_state: AnalystState = {
             "question": question,
             "agent_response": agent_response,

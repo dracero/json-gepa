@@ -71,10 +71,10 @@ class LangSmithExtractor:
 
         interactions: list[Interaction] = []
 
-        for root_id in root_ids:
-            root_run = root_run_map.get(root_id)
-            if root_run is None:
-                continue
+        # Process root runs in chronological order
+        sorted_root_runs = sorted(root_runs, key=lambda r: r.start_time)
+        for root_run in sorted_root_runs:
+            root_id = str(root_run.id)
 
             child_runs = trace_to_runs.get(root_id, [])
             # Exclude the root run itself when it reappears as a child.
@@ -82,20 +82,22 @@ class LangSmithExtractor:
             child_runs.sort(key=lambda r: r.start_time)
 
             # Pre-scan for retrieval context from multiple sources:
-            # 1. Retriever runs (search_qdrant outputs — vector DB results)
-            # 2. LLM message markers (SECCIONES DEL MANUAL — rag-histologia style)
-            # 3. Embedded tracing context in HumanMessage (standalone pipeline steps)
-            trace_retrieval_context = ""
+            # 1. Root run outputs (directly from pipeline state output e.g. contexto_documentos)
+            # 2. Retriever runs (search_qdrant outputs — vector DB results)
+            # 3. LLM message markers (SECCIONES DEL MANUAL — rag-histologia style)
+            # 4. Embedded tracing context in HumanMessage (standalone pipeline steps)
+            trace_retrieval_context = self._extract_root_context(root_run)
 
-            # Source 1: Retriever run outputs (vector DB results)
-            retriever_runs = trace_to_retrievers.get(root_id, [])
-            for rr in reversed(retriever_runs):
-                ctx = self._extract_retriever_context(rr)
-                if ctx:
-                    trace_retrieval_context = ctx
-                    break
+            # Source 2: Retriever run outputs (vector DB results)
+            if not trace_retrieval_context:
+                retriever_runs = trace_to_retrievers.get(root_id, [])
+                for rr in reversed(retriever_runs):
+                    ctx = self._extract_retriever_context(rr)
+                    if ctx:
+                        trace_retrieval_context = ctx
+                        break
 
-            # Source 2: LLM message markers (fallback)
+            # Source 3: LLM message markers (fallback)
             if not trace_retrieval_context:
                 for run in reversed(child_runs):
                     ctx = self._extract_retrieval_context(run)
@@ -103,13 +105,50 @@ class LangSmithExtractor:
                         trace_retrieval_context = ctx
                         break
 
-            # Source 3: Embedded tracing context in HumanMessage (standalone runs)
+            # Source 4: Embedded tracing context in HumanMessage (standalone runs)
             if not trace_retrieval_context:
                 for run in reversed(child_runs):
                     ctx = self._extract_embedded_tracing_context(run)
                     if ctx:
                         trace_retrieval_context = ctx
                         break
+
+            # Direct root Q&A extraction (best for single-turn LangGraph/pipeline runs)
+            root_inputs = root_run.inputs or {}
+            root_outputs = root_run.outputs or {}
+            root_question = None
+            for key in ["consulta_in", "consulta_usuario", "question", "query", "input", "prompt"]:
+                val = root_inputs.get(key)
+                if val and isinstance(val, str) and val.strip():
+                    root_question = val.strip()
+                    break
+            if not root_question:
+                for key in ["consulta_usuario", "question", "query", "input"]:
+                    val = root_outputs.get(key)
+                    if val and isinstance(val, str) and val.strip():
+                        root_question = val.strip()
+                        break
+
+            root_response = None
+            for key in ["respuesta_final", "output", "response", "final_response", "agent_response"]:
+                val = root_outputs.get(key)
+                if val and isinstance(val, str) and val.strip():
+                    root_response = val.strip()
+                    break
+
+            if root_question and root_response:
+                interactions.append(
+                    Interaction(
+                        trace_id=root_id,
+                        trace_timestamp=root_run.start_time,
+                        turn_index=0,
+                        question=root_question,
+                        agent_response=root_response,
+                        retrieval_context=trace_retrieval_context,
+                        history=[],
+                    )
+                )
+                continue
 
             history: list[HistoryTurn] = []
             for turn_index, run in enumerate(child_runs):
@@ -568,6 +607,51 @@ class LangSmithExtractor:
         except Exception:
             logger.exception("Error extracting embedded tracing context from run %s", run.id)
             return ""
+
+    def _extract_root_context(self, root_run) -> str:
+        """Extract retrieved context from the root run's outputs (e.g. state keys)."""
+        if not root_run or not root_run.outputs:
+            return ""
+
+        outputs = root_run.outputs
+        
+        onto = outputs.get("contexto_ontologico")
+        onto_str = ""
+        if onto and isinstance(onto, str) and onto.strip():
+            onto_str = f"**CONTEXTO ONTOLÓGICO:**\n{onto.strip()}"
+
+        doc_context = ""
+        # Try various keys for retrieved document context
+        for key in ["contexto_documentos", "retrieved_context", "retrieval_context", "context"]:
+            val = outputs.get(key)
+            if val and isinstance(val, str) and val.strip():
+                doc_context = val.strip()
+                break
+
+        if not doc_context:
+            busqueda = outputs.get("resultados_busqueda")
+            if busqueda and isinstance(busqueda, list):
+                parts = []
+                for i, item in enumerate(busqueda):
+                    if isinstance(item, dict):
+                        payload = item.get("payload", {})
+                        score = item.get("score", 0)
+                        text = payload.get("text") or payload.get("texto", "")
+                        pdf = payload.get("pdf_name", "").split("/")[-1] if payload.get("pdf_name") else ""
+                        if text:
+                            header = f"[Sección {i+1} | Fuente: {pdf} | Sim: {score}]"
+                            parts.append(f"{header}\n{text}")
+                if parts:
+                    doc_context = "\n\n".join(parts)
+
+        # Merge them
+        merged = []
+        if doc_context:
+            merged.append(doc_context)
+        if onto_str:
+            merged.append(onto_str)
+
+        return "\n\n".join(merged) if merged else ""
 
     @staticmethod
     def _is_pipeline_intermediate_step(run, question: str, response: str) -> bool:
